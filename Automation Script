@@ -1,0 +1,95 @@
+from PyPDF2 import PdfWriter, PdfReader
+import io
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+import pandas as pd
+
+# Read data from Excel file
+excel_file_path = "/Users/davidcampbell/Desktop/Beat/WK 40.xlsx"
+df = pd.read_excel(excel_file_path)
+
+
+# Iterate over rows in the DataFrame
+for index, row in df.iterrows():
+    # Choose the appropriate blank template based on the presence of a value in the adjustment column
+    if pd.notnull(row['Adjustment']):
+        existing_pdf_path = "/Users/davidcampbell/Desktop/Beat/Blank72Adjust.pdf"
+        total_due_y_coordinate = 465  # Y-coordinate for "Total Due" when using adjustment
+    else:
+        existing_pdf_path = "/Users/davidcampbell/Desktop/Beat/Blank72.pdf"
+        total_due_y_coordinate = 492  # Y-coordinate for "Total Due" when not using adjustment
+
+    # Specific x and y coordinates for drawing text
+    coordinates = [
+        (185, 614),  # Name
+        (255, 520),  # Price
+        (345, 520),  # Quantity
+        (446, 520),  # Total
+        (446, 492),  # Balance
+        (446, total_due_y_coordinate),  # Total Due
+        (432, 612.5),  # Name Again
+    ]
+
+    output_folder = "/Users/davidcampbell/Desktop/Beat/Invoices/Jake" if row['Folder'] == 'Jake' else ( "/Users/davidcampbell/Desktop/Beat/Invoices/Siegs" if row['Folder'] == 'Siegs' else "/Users/davidcampbell/Desktop/Beat/Invoices/Davey")
+
+    # Create a BytesIO buffer for each row
+    packet = io.BytesIO()
+
+    # Create a new PDF with ReportLab for each row
+    can = canvas.Canvas(packet, pagesize=letter)
+
+    # Set font to bold
+    can.setFont("Helvetica-Bold", 13)
+
+    # Flag to track if "Total Due" has been drawn for non-adjustment sheet
+    total_due_drawn = False
+
+    # Iterate over the columns and draw bold text using specified coordinates
+    for (x, y), column in zip(coordinates, df.columns):
+        # Skip drawing if the column is 'Adjustment' and there is no adjustment value
+        if column == 'Adjustment' and pd.isna(row['Adjustment']):
+            continue
+
+        # Format to two decimal places if the value is a float
+        text = "{:.2f}".format(row[column]) if pd.notnull(row[column]) and isinstance(row[column], float) else str(
+            row[column])
+
+        # Draw bold text
+        can.drawString(x, y, text)
+
+        # Draw "Total Due" text with the appropriate y-coordinate only once when using the non-adjustment sheet
+        if not total_due_drawn and pd.isna(row['Adjustment']) and column == 'Total Due':
+            can.drawString(446, total_due_y_coordinate, "{:.2f}".format(row['Total Due']) if pd.notnull(row['Total Due']) else '')
+            total_due_drawn = True
+
+    # Save the canvas for the current row
+    can.save()
+
+    # Move to the beginning of the StringIO buffer
+    packet.seek(0)
+
+    # Create a new PdfReader from the BytesIO buffer
+    new_pdf = PdfReader(packet)
+
+    # Read the existing PDF template
+    with open(existing_pdf_path, "rb") as existing_pdf_file:
+        existing_pdf = PdfReader(existing_pdf_file)
+
+        # Check if there are any pages in the existing PDF
+        if existing_pdf.pages:
+            # Create a new PDF writer
+            output = PdfWriter()
+
+            # Merge the existing PDF and the new PDF
+            page = existing_pdf.pages[0]
+            page.merge_page(new_pdf.pages[0])
+            output.add_page(page)
+
+            # Write the output to a new file with a name based on the current row
+            output_pdf_path = f"{output_folder}/{row['Name']}_72.pdf"
+            with open(output_pdf_path, "wb") as output_stream:
+                output.write(output_stream)
+        else:
+
+            print(f"No pages found in {existing_pdf_path}")
+
